@@ -1,0 +1,5 @@
+# Mi dirección
+localhost,18812
+# Direcciones de las réplicas
+192.168.1.2,18813
+192.168.1.3,18814

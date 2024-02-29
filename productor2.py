@@ -12,7 +12,7 @@ def leer_configuracion(archivo_config='config.txt'):
     return ip, port
 
 def productor(productor_id):
-    conn = rpyc.connect("localhost", 18812)
+    conn = rpyc.connect("localhost", 20001)
     # ip, port = leer_configuracion()
     # conn = rpyc.connect(ip, port)
     keys = ['clave1', 'clave2', 'clave3']

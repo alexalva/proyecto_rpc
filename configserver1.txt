@@ -1,0 +1,7 @@
+# RPyC service address and port
+localhost,20001
+# Socket service address and port for replicas
+localhost,21001
+# Replica addresses and ports
+localhost,21002
+localhost,21003
