@@ -3,8 +3,18 @@ import rpyc
 import random
 import time
 
+def leer_configuracion(archivo_config='config.txt'):
+    """Lee la dirección IP y el puerto desde un archivo de configuración."""
+    with open(archivo_config, 'r') as file:
+        lines = file.readlines()
+        ip = lines[0].strip()
+        port = int(lines[1].strip())
+    return ip, port
+
 def productor(productor_id):
     conn = rpyc.connect("localhost", 18812)
+    # ip, port = leer_configuracion()
+    # conn = rpyc.connect(ip, port)
     keys = ['clave1', 'clave2', 'clave3']
     operations = ['set', 'add', 'mult']
     
