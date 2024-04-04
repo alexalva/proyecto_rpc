@@ -1,7 +1,7 @@
 # Servidor
 import rpyc
 from rpyc.utils.server import ThreadedServer
-from StateMachine_future import StateMachine
+from StateMachine_future2 import StateMachine
 from operation_future import OperationFuture
 import threading
 import time
@@ -49,13 +49,82 @@ class MyService(rpyc.Service):
                 data = client_socket.recv(1024)  # Tamaño del buffer 1024 bytes
                 if not data:
                     break  # Conexión cerrada
-                message = json.loads(data.decode('utf-8'))
-                print(message)  # Decodifica y carga JSON directamente
-                operation = message['operation']['action']
-                key = message['operation']['key']
-                value = message['operation']['value']
-                self.sm.produce(operation, key, value)  # Encola la operación
-                print(f"Operación encolada. Tamaño del buffer ahora: {self.sm.buffer.qsize()}")
+                try:
+                    message = json.loads(data.decode('utf-8'))
+                    # Directamente usa los valores sin necesidad de buscar un sub-diccionario
+                    operation = message.get('operation')
+                    key = message.get('key')
+                    value = message.get('value')
+                    lamport_timestamp = message.get('timestamp', 0)
+                    print(f"Recibido: Operación {operation}, clave {key}, valor {value}, timestamp {lamport_timestamp}")
+                    
+                    # Aquí la lógica para procesar el mensaje...
+                    self.broadcast_operation(operation, key, value, self.sm.lamport_clock)
+                    self.sm.lamport_clock = max(lamport_timestamp, self.sm.lamport_clock) + 1
+                    print(f"Operación encolada. Tamaño del buffer ahora: {self.sm.buffer.qsize()}")
+                    self.sm.produce(operation, key, value, timestamp=self.sm.lamport_clock)
+                except json.JSONDecodeError as e:
+                    print("Error al decodificar el mensaje JSON:", e)
+
+
+    # def broadcast_operation(self, operation, key, value, timestamp):
+    #     """
+    #     Envía la operación a todas las réplicas y espera confirmaciones.
+    #     """
+    #     confirmations_received = 0
+    #     total_replicas = len(self.replica_addresses)
+
+    #     for address in self.replica_addresses:
+    #         if address != self.my_address:  # No enviar a sí mismo
+    #             try:
+    #                 with socket.create_connection(address, timeout=10) as sock:
+    #                     message = json.dumps({
+    #                         "operation": operation,
+    #                         "key": key,
+    #                         "value": value,
+    #                         "timestamp": timestamp
+    #                     }).encode('utf-8')
+    #                     print(f"Enviando operación a réplica en {address}: {message}")
+    #                     sock.sendall(message)
+    #                     # Espera por una confirmación
+    #                     response = sock.recv(1024)
+    #                     if response and json.loads(response.decode('utf-8')).get('confirmation', False):
+    #                         confirmations_received += 1
+    #             except Exception as e:
+    #                 print(f"Error replicando a {address}: {e}")
+
+    #     if confirmations_received == total_replicas - 1:
+    #         # Todas las réplicas (excepto esta) han confirmado
+    #         self.sm.confirm_operation(operation, timestamp)
+
+
+    def broadcast_operation(self, operation, key, value, timestamp):
+        confirmations_received = 0
+        for address in self.replica_addresses:
+            if address != self.my_address:  # No enviar a sí mismo
+                try:
+                    with socket.create_connection(address, timeout=10) as sock:
+                        message = json.dumps({
+                            "operation": operation,
+                            "key": key,
+                            "value": value,
+                            "timestamp": timestamp
+                        }).encode('utf-8')
+                        print(f"Enviando operación a réplica en {address}: {message}")
+                        sock.sendall(message)
+                        # Espera por una confirmación
+                        response = sock.recv(1024)
+                        if response and json.loads(response.decode('utf-8')).get('confirmation', False):
+                            print(f"Confirmación recibida de réplica en {address}")
+                            confirmations_received += 1
+                except Exception as e:
+                    print(f"Error replicando a {address}: {e}")
+
+        # Verificar si se recibieron todas las confirmaciones necesarias
+        all_confirmed = confirmations_received == len(self.replica_addresses) - 1
+        if all_confirmed:
+            print(f"Todas las réplicas han confirmado la operación: {operation} con timestamp {timestamp}")
+        return all_confirmed
 
     def replicate_to_peers(self, operation, key, value):
         message = json.dumps({
@@ -77,10 +146,25 @@ class MyService(rpyc.Service):
         return self.sm.get(key)
 
     def exposed_update(self, key, value, operation):
-        result = self.sm.produce(operation, key, value)
-        if result:
-            self.replicate_to_peers(operation, key, value)
-        return result
+        # Incrementa el timestamp de Lamport antes de enviar la operación
+        timestamp = self.sm.increment_clock()
+        print(f"Iniciando broadcast para la operación: {operation} con timestamp: {timestamp}")
+
+        # Realiza el broadcast de la operación a todas las réplicas
+        all_confirmed = self.broadcast_operation(operation, key, value, timestamp)
+
+        if all_confirmed:
+            print(f"Operación {operation} confirmada por todas las réplicas.")
+            # Procede solo si todas las réplicas han confirmado la operación
+            result = self.sm.produce(operation, key, value, timestamp=timestamp)
+            # Aquí podrías aplicar la operación de manera efectiva o encolarla para su procesamiento
+            print(f"Operación {operation} aplicada con éxito.")
+            return True
+        else:
+            print(f"Operación {operation} no pudo ser confirmada por todas las réplicas.")
+            return False
+
+
 
     def process_buffer(self):
         # Hilo que consume operaciones del buffer y las aplica

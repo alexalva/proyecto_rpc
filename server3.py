@@ -1,7 +1,7 @@
 # Servidor
 import rpyc
 from rpyc.utils.server import ThreadedServer
-from StateMachine import StateMachine
+from StateMachine3 import StateMachine
 import threading
 import time
 import socket
@@ -49,19 +49,36 @@ class MyService(rpyc.Service):
                 if not data:
                     break  # Conexión cerrada
                 message = json.loads(data.decode('utf-8'))  # Decodifica y carga JSON directamente
+                print(message)
+
+                # Actualiza el reloj de Lamport con el sello de tiempo recibido
+                received_timestamp = message.get("timestamp", 0)  # Asume un valor por defecto si no se proporciona
+                self.sm.update_clock(received_timestamp)
+
                 operation = message['operation']['action']
                 key = message['operation']['key']
                 value = message['operation']['value']
-                self.sm.produce((operation, key, value))  # Encola la operación
+
+                # Incrementa el reloj de Lamport antes de encolar la operación
+                timestamp = self.sm.increment_clock()
+
+
+
+                self.sm.produce(operation, key, value, timestamp)  # Encola la operación
                 print(f"Operación encolada. Tamaño del buffer ahora: {self.sm.buffer.qsize()}")
 
     def replicate_to_peers(self, operation, key, value):
+         # Obtén el sello de tiempo de Lamport actual
+        timestamp = self.sm.increment_clock()
+
+        # Construye el mensaje incluyendo el sello de tiempo de Lamport
         message = json.dumps({
             "operation": {
                 "action": operation,
                 "key": key,
                 "value": value
-            }
+            },
+            "timestamp": timestamp  # Incluye el sello de tiempo de Lamport aquí
         })
         for address in self.replica_addresses:
             try:
